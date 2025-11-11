@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Fuzzy Reasoner Visualization Dashboard</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+      :root {
+        --bg: #0e1118;
+        --panel: #181c25;
+        --accent: #5daeff;
+        --text: #e5e7eb;
+        --highlight: #2f80ed;
+        --danger: #ff5959;
+        --muted: #9ca3af;
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        display: grid;
+        grid-template-columns: 1fr 360px;
+        height: 100vh;
+        overflow: hidden;
+      }
+      #graph {
+        width: 100%;
+        height: 100%;
+        cursor: grab;
+      }
+      #sidebar {
+        background: var(--panel);
+        border-left: 1px solid #222;
+        padding: 18px;
+        overflow-y: auto;
+        box-shadow: -2px 0 8px rgba(0, 0, 0, 0.4);
+      }
+      h1 {
+        margin-top: 0;
+        color: var(--accent);
+        font-size: 22px;
+        letter-spacing: 0.5px;
+        text-align: center;
+      }
+      input,
+      .slider {
+        width: 100%;
+        margin-top: 6px;
+        margin-bottom: 10px;
+        background: #232833;
+        border: none;
+        color: var(--text);
+        padding: 8px;
+        border-radius: 6px;
+        font-size: 15px;
+      }
+      .panel {
+        background: #1a1e2a;
+        padding: 10px 14px;
+        border-radius: 8px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        margin-bottom: 14px;
+      }
+      .panel h3 {
+        margin-top: 0;
+        font-size: 16px;
+        border-bottom: 1px solid #333;
+        padding-bottom: 6px;
+      }
+      .result {
+        background: #202734;
+        padding: 8px 10px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        transition: background 0.3s;
+      }
+      .result:hover {
+        background: #293449;
+      }
+      .degree-bar {
+        height: 6px;
+        border-radius: 4px;
+        background: var(--highlight);
+        width: 0%;
+        transition: width 0.6s ease;
+      }
+      .legend {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .legend .dot {
+        width: 10px;
+        height: 10px;
+        display: inline-block;
+        border-radius: 50%;
+        margin-right: 5px;
+      }
+      svg text {
+        fill: var(--text);
+        font-size: 13px;
+        user-select: none;
+        pointer-events: none;
+      }
+      /* Tooltip Style */
+      .tooltip {
+        position: absolute;
+        background: rgba(30, 30, 40, 0.95);
+        color: #fff;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 13px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+    </style>
+  </head>
+  <body>
+    <svg id="graph"></svg>
+    <div id="sidebar">
+      <h1>Fuzzy Reasoner</h1>
+      <div class="panel">
+        <h3>🔍 Explore Sorts</h3>
+        <input id="search" placeholder="Search node (e.g., thriller)" />
+        <div class="legend">
+          <div>
+            <span class="dot" style="background: #5daeff"></span> Subsumption
+          </div>
+          <div>
+            <span class="dot" style="background: #ff5959"></span> Similarity
+          </div>
+        </div>
+        <label>Similarity Threshold: <span id="thval">0.0</span></label>
+        <input
+          type="range"
+          id="threshold"
+          min="0"
+          max="1"
+          step="0.1"
+          value="0"
+          class="slider"
+        />
+      </div>
+      <div class="panel">
+        <h3>📘 Selected Sort</h3>
+        <div id="selected">None</div>
+      </div>
+      <div class="panel">
+        <h3>🧠 Query Results</h3>
+        <div id="results">Click a node to run a fuzzy query.</div>
+      </div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+      const svg = d3.select("#graph");
+      const width = window.innerWidth - 360,
+        height = window.innerHeight;
+      const colorSub = "#5daeff",
+        colorSim = "#ff5959";
+      const g = svg.append("g");
+      const tooltip = d3.select("#tooltip");
+
+      // Zoom & Pan
+      const zoom = d3
+        .zoom()
+        .scaleExtent([0.4, 3])
+        .on("zoom", (event) => g.attr("transform", event.transform));
+      svg.call(zoom);
+
+      fetch("/graph")
+        .then((r) => r.json())
+        .then((data) => {
+          const nodes = data.nodes.map((d) => Object.assign({}, d));
+          const links = data.edges.map((d) => Object.assign({}, d));
+
+          const simulation = d3
+            .forceSimulation(nodes)
+            .force(
+              "link",
+              d3
+                .forceLink(links)
+                .id((d) => d.id)
+                .distance(150)
+            )
+            .force("charge", d3.forceManyBody().strength(-420))
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("collision", d3.forceCollide().radius(40));
+
+          const link = g
+            .append("g")
+            .attr("stroke-opacity", 0.9)
+            .selectAll("line")
+            .data(links)
+            .join("line")
+            .attr("stroke", (d) =>
+              d.type === "subsumption" ? colorSub : colorSim
+            )
+            .attr("stroke-width", (d) => Math.max(1.5, d.weight * 5))
+            .attr("stroke-dasharray", (d) =>
+              d.type === "similarity" ? "4 2" : "none"
+            )
+            .on("mousemove", (event, d) => {
+              tooltip.transition().duration(100).style("opacity", 1);
+              tooltip
+                .html(
+                  `<b>${
+                    d.type === "subsumption"
+                      ? "Subsumption (is-a)"
+                      : "Similarity"
+                  }</b><br>Degree: ${d.weight}`
+                )
+                .style("left", event.pageX + 10 + "px")
+                .style("top", event.pageY - 20 + "px");
+            })
+            .on("mouseout", () =>
+              tooltip.transition().duration(300).style("opacity", 0)
+            );
+
+          const nodeGroup = g
+            .append("g")
+            .selectAll("g")
+            .data(nodes)
+            .join("g")
+            .attr("cursor", "pointer")
+            .on("click", (_, d) => focusNode(d));
+
+          const node = nodeGroup
+            .append("circle")
+            .attr("r", 24)
+            .attr("fill", "#1f2838")
+            .attr("stroke", "#88b4ff")
+            .attr("stroke-width", 1.5)
+            .style("filter", "drop-shadow(0 0 3px #0a0a0a)");
+
+          const label = nodeGroup
+            .append("text")
+            .text((d) => d.id)
+            .attr("text-anchor", "middle")
+            .attr("dy", 5)
+            .attr("font-size", "13px");
+
+          simulation.on("tick", () => {
+            link
+              .attr("x1", (d) => d.source.x)
+              .attr("y1", (d) => d.source.y)
+              .attr("x2", (d) => d.target.x)
+              .attr("y2", (d) => d.target.y);
+            nodeGroup.attr("transform", (d) => `translate(${d.x},${d.y})`);
+          });
+
+          // Focus and zoom animation
+          function focusNode(d) {
+            const scale = 1.8;
+            const translate = [
+              width / 2 - scale * d.x,
+              height / 2 - scale * d.y,
+            ];
+            svg
+              .transition()
+              .duration(800)
+              .call(
+                zoom.transform,
+                d3.zoomIdentity.translate(...translate).scale(scale)
+              );
+
+            node.transition().duration(300).attr("stroke", "#88b4ff");
+            d3.select(d3.event ? d3.event.target : null)
+              .transition()
+              .attr("stroke", "#2f80ed")
+              .attr("stroke-width", 3)
+              .transition()
+              .attr("stroke-width", 1.5);
+
+            runQuery(d);
+          }
+
+          function runQuery(d) {
+            document.getElementById("selected").textContent = d.id;
+            document.getElementById("results").innerHTML = "<i>Loading...</i>";
+            fetch("/query", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sort: d.id, features: {} }),
+            })
+              .then((r) => r.json())
+              .then((results) => {
+                const div = document.getElementById("results");
+                if (results.length === 0) {
+                  div.innerHTML = "<i>No matches found.</i>";
+                  return;
+                }
+                div.innerHTML = "";
+                results.forEach((r) => {
+                  const el = document.createElement("div");
+                  el.className = "result";
+                  el.innerHTML = `<b>${r.name}</b><br>
+                <small style="color:var(--muted)">${r.unifier}</small>
+                <div class="degree-bar" style="width:${
+                  r.degree * 100
+                }%"></div>`;
+                  div.appendChild(el);
+                });
+              });
+          }
+
+          // Search
+          document.getElementById("search").addEventListener("input", (e) => {
+            const term = e.target.value.toLowerCase();
+            node.attr("fill", (d) =>
+              d.id.toLowerCase().includes(term) ? "#2f80ed" : "#1f2838"
+            );
+          });
+
+          // Threshold filter
+          const slider = document.getElementById("threshold");
+          slider.addEventListener("input", () => {
+            const val = parseFloat(slider.value);
+            document.getElementById("thval").textContent = val.toFixed(1);
+            link.attr("display", (d) =>
+              d.type === "similarity" && d.weight < val ? "none" : ""
+            );
+          });
+        });
+    </script>
+  </body>
+</html>

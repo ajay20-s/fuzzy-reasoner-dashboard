@@ -1,48 +1,32 @@
-# app.py
 from flask import Flask, request, jsonify, render_template
-from fuzzy_cedar import example_setup, run_query, OSFTerm, get_graph_data
+from fuzzy_cedar import example_setup, OSFTerm, run_query, get_graph_data
 
-app = Flask(__name__, template_folder='templates')
-kb, deg_fn, sorts, M, idx = example_setup()
+app = Flask(__name__, template_folder="templates")
 
-@app.route('/')
+kb, deg_fn = example_setup()
+
+@app.route("/")
 def home():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/graph', methods=['GET'])
+@app.route("/graph")
 def graph():
-    data = get_graph_data(kb)
-    return jsonify(data)
+    threshold = float(request.args.get("t", 0.0))
+    return jsonify(get_graph_data(kb, threshold))
 
-@app.route('/query', methods=['POST'])
+@app.route("/query", methods=["POST"])
 def query():
     data = request.json
-    sort = data.get('sort')
-    feats = data.get('features', {})
+    sort = data["sort"]
+    threshold = data.get("threshold", 0.0)
 
-    def parse_val(v):
-        if v is None:
-            return None
-        if isinstance(v, dict) and 'sort' in v:
-            f = {}
-            for k, val in v.get('features', {}).items():
-                f[k] = parse_val(val)
-            const = v.get('const_value', None)
-            return OSFTerm(v['sort'], features=f, const_value=const)
-        return v
+    q = OSFTerm(sort)
+    results = run_query(kb, q, deg_fn, threshold)
 
-    features_parsed = {}
-    for k, v in feats.items():
-        val = parse_val(v)
-        if val is not None:
-            features_parsed[k] = val
+    return jsonify([
+        {"name": name, "degree": float(d), "unifier": str(u)}
+        for name, u, d in results
+    ])
 
-    q = OSFTerm(sort, features=features_parsed)
-    results = run_query(kb, q, deg_fn, threshold=0.01)
-    out = []
-    for name, unif, deg in results:
-        out.append({'name': name, 'degree': float(deg), 'unifier': str(unif)})
-    return jsonify(out)
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True, port=5000)

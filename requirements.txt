@@ -1,1 +1,13 @@
-flask
+Flask==3.0.3
+Jinja2==3.1.6
+Werkzeug==3.0.6
+itsdangerous==2.2.0
+blinker==1.8.2
+flask-cors==4.0.0
+
+numpy==1.26.4
+scikit-learn==1.4.2
+
+# For AI-driven similarity (optional)
+sentence-transformers==2.2.2
+torch==2.2.0
